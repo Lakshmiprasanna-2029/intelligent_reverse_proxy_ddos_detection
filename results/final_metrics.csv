@@ -1,0 +1,2 @@
+model,training_time_seconds,validation_accuracy,validation_balanced_accuracy,validation_macro_precision,validation_macro_recall,validation_macro_f1,test_accuracy,test_balanced_accuracy,test_macro_precision,test_macro_recall,test_macro_f1,test_macro_roc_auc
+XGBoost,9.28276801109314,0.9965333333333334,0.9963558201058201,0.996378519209287,0.9963558201058201,0.9963654150955507,0.9954666666666667,0.9949166666666667,0.9947084649848511,0.9949166666666667,0.9948083375749875,0.9998910567446103

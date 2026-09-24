@@ -1,0 +1,14 @@
+.venv/
+__pycache__/
+*.pyc
+node_modules/
+frontend/node_modules/
+frontend/dist/
+.env
+*.log
+
+# Temporary search/debug files
+find_attack.py
+find_rate_limit.py
+rate_limit_features.txt
+rate_limit_output.txt

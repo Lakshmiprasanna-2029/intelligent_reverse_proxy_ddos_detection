@@ -1,0 +1,7 @@
+,BENIGN,DDoS_LOIC_HTTP,DoS_GoldenEye,DoS_Hulk,DoS_Slowhttptest,DoS_Slowloris
+BENIGN,6279,1,11,2,7,0
+DDoS_LOIC_HTTP,4,2996,0,0,0,0
+DoS_GoldenEye,8,0,1191,0,1,0
+DoS_Hulk,27,0,0,2973,0,0
+DoS_Slowhttptest,2,0,2,0,744,2
+DoS_Slowloris,1,0,0,0,0,749

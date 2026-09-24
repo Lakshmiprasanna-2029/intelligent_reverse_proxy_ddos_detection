@@ -1,0 +1,15 @@
+{
+    "adaptive_threshold": 0.5,
+    "rate_limit_threshold": 0.35,
+    "block_threshold": 0.5,
+    "weights": {
+        "attack_probability": 0.6,
+        "classification_confidence": 0.25,
+        "predicted_attack_class": 0.15
+    },
+    "policy": {
+        "ALLOW": "risk < 0.350000",
+        "RATE_LIMIT": "0.350000 <= risk < 0.500000",
+        "BLOCK": "risk >= 0.500000"
+    }
+}
