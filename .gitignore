@@ -12,3 +12,6 @@ find_attack.py
 find_rate_limit.py
 rate_limit_features.txt
 rate_limit_output.txt
+
+data/
+results/live_requests.csv
