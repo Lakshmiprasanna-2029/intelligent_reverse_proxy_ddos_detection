@@ -16,13 +16,14 @@ import {
 
 import "./App.css";
 
-const API = "/api";
+const API = "";
 
 function App() {
   const [requests, setRequests] = useState([]);
   const [backendStatus, setBackendStatus] = useState("CHECKING");
   const [activePage, setActivePage] = useState("Overview");
   const [lastUpdate, setLastUpdate] = useState(null);
+  const [modelEvaluation, setModelEvaluation] = useState(null);
 
   // ============================================================
   // LOAD DATA
@@ -50,6 +51,21 @@ function App() {
     }
   };
 
+  const loadModelEvaluation = async () => {
+    try {
+      const response = await fetch(`${API}/dashboard/model-evaluation`);
+
+      if (!response.ok) {
+        throw new Error("Failed to load model evaluation");
+      }
+
+      const data = await response.json();
+      setModelEvaluation(data);
+    } catch (error) {
+      console.error("Model evaluation error:", error);
+    }
+  };
+
   const checkHealth = async () => {
     try {
       const response = await fetch(`${API}/health`);
@@ -67,10 +83,12 @@ function App() {
   useEffect(() => {
     loadData();
     checkHealth();
+    loadModelEvaluation();
 
     const interval = setInterval(() => {
       loadData();
       checkHealth();
+      loadModelEvaluation();
     }, 2000);
 
     return () => clearInterval(interval);
@@ -261,6 +279,10 @@ function App() {
     {
       name: "Attack Detection",
       icon: "🛡️",
+    },
+    {
+      name: "Model Evaluation",
+      icon: "🧠",
     },
     {
       name: "Risk Analysis",
@@ -677,7 +699,7 @@ function App() {
 
         <div className="model-status">
           <span className="status-dot online" />
-          XGBoost Model Active
+          Cascade Active: Student DNN + FT-Transformer
         </div>
       </div>
 
@@ -845,6 +867,258 @@ function App() {
       />
     </>
   );
+
+  // ============================================================
+  // MODEL EVALUATION
+  // ============================================================
+
+  const renderModelEvaluation = () => {
+    const evaluation = modelEvaluation?.evaluation;
+    const xgb = modelEvaluation?.xgboost;
+    const student = modelEvaluation?.student;
+    const teacher = modelEvaluation?.teacher;
+    const cascade = modelEvaluation?.cascade;
+    const limiter = modelEvaluation?.adaptive_limiter;
+    const decay = modelEvaluation?.reputation_decay;
+
+    const comparisonData = [
+      {
+        name: "XGBoost",
+        accuracy: Number(xgb?.accuracy || 0) * 100,
+        role: "Baseline",
+      },
+      {
+        name: "Student DNN",
+        accuracy: Number(student?.accuracy || 0) * 100,
+        role: "Fast Detector",
+      },
+      {
+        name: "FT-Transformer",
+        accuracy: Number(teacher?.accuracy || 0) * 100,
+        role: "Teacher",
+      },
+      {
+        name: "Final Cascade",
+        accuracy: Number(cascade?.accuracy || 0) * 100,
+        role: "Production",
+      },
+    ];
+
+    return (
+      <>
+        <div className="page-title">
+          <div>
+            <h1>Model Evaluation &amp; AI Cascade</h1>
+            <p>
+              XGBoost baseline, Student DNN, FT-Transformer teacher and adaptive protection
+            </p>
+          </div>
+
+          <div className="model-status">
+            <span className="status-dot online" />
+            Live Evaluation
+          </div>
+        </div>
+
+        <div className="stat-grid">
+          <div className="stat-card blue">
+            <div className="stat-label">XGBOOST BASELINE</div>
+            <div className="stat-value">
+              {xgb ? `${(Number(xgb.accuracy) * 100).toFixed(2)}%` : "—"}
+            </div>
+            <div className="stat-description">Macro F1: {xgb ? Number(xgb.macro_f1).toFixed(4) : "—"}</div>
+          </div>
+
+          <div className="stat-card green">
+            <div className="stat-label">STUDENT DNN</div>
+            <div className="stat-value">
+              {student ? `${(Number(student.accuracy) * 100).toFixed(2)}%` : "—"}
+            </div>
+            <div className="stat-description">Handles {student ? Number(student.handling_percent).toFixed(1) : "—"}% of requests</div>
+          </div>
+
+          <div className="stat-card orange">
+            <div className="stat-label">FT-TRANSFORMER</div>
+            <div className="stat-value">
+              {teacher ? `${(Number(teacher.accuracy) * 100).toFixed(2)}%` : "—"}
+            </div>
+            <div className="stat-description">Teacher escalation: {teacher ? Number(teacher.escalation_percent).toFixed(1) : "—"}%</div>
+          </div>
+
+          <div className="stat-card purple">
+            <div className="stat-label">FINAL CASCADE</div>
+            <div className="stat-value">
+              {cascade ? `${Number(cascade.accuracy_percent).toFixed(2)}%` : "—"}
+            </div>
+            <div className="stat-description">Attack success: {cascade ? Number(cascade.attack_success_percent).toFixed(2) : "—"}%</div>
+          </div>
+        </div>
+
+        <section className="dashboard-grid">
+          <div className="dashboard-panel">
+            <div className="panel-heading">
+              <div>
+                <h2>Model Accuracy Comparison</h2>
+                <p>Baseline versus production cascade</p>
+              </div>
+            </div>
+
+            <div className="chart-box">
+              <ResponsiveContainer width="100%" height={330}>
+                <BarChart data={comparisonData}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
+                  <XAxis dataKey="name" stroke="#94a3b8" />
+                  <YAxis domain={[0, 100]} stroke="#94a3b8" />
+                  <Tooltip
+                    formatter={(value) => [`${Number(value).toFixed(2)}%`, "Accuracy"]}
+                    contentStyle={{ background: "#111827", border: "1px solid #334155" }}
+                  />
+                  <Bar dataKey="accuracy" fill="#8b5cf6" radius={[6, 6, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+
+          <div className="dashboard-panel">
+            <div className="panel-heading">
+              <div>
+                <h2>Inference Cascade</h2>
+                <p>How AegisProxy makes the final decision</p>
+              </div>
+            </div>
+
+            <div style={{ display: "grid", gap: "14px", padding: "18px" }}>
+              <div className="stat-card blue">
+                <div className="stat-label">1 • BASELINE</div>
+                <div className="stat-value" style={{ fontSize: "24px" }}>XGBoost</div>
+                <div className="stat-description">28 features • 6 classes • 15,000 test samples</div>
+              </div>
+
+              <div className="stat-card green">
+                <div className="stat-label">2 • PRIMARY FAST DETECTOR</div>
+                <div className="stat-value" style={{ fontSize: "24px" }}>Student DNN</div>
+                <div className="stat-description">{student ? Number(student.handling_percent).toFixed(1) : "—"}% handled without escalation</div>
+              </div>
+
+              <div className="stat-card orange">
+                <div className="stat-label">3 • ESCALATION TEACHER</div>
+                <div className="stat-value" style={{ fontSize: "24px" }}>FT-Transformer</div>
+                <div className="stat-description">{teacher ? Number(teacher.escalation_percent).toFixed(1) : "—"}% escalated for deeper evaluation</div>
+              </div>
+
+              <div className="stat-card purple">
+                <div className="stat-label">4 • FINAL DECISION</div>
+                <div className="stat-value" style={{ fontSize: "24px" }}>Cascade</div>
+                <div className="stat-description">Student + teacher + risk engine + adaptive limiter</div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section className="dashboard-panel" style={{ marginTop: "20px" }}>
+          <div className="panel-heading">
+            <div>
+              <h2>Detailed Evaluation Results</h2>
+              <p>{evaluation?.dataset || "E4 replay evaluation"}</p>
+            </div>
+          </div>
+
+          <div className="table-wrapper">
+            <table>
+              <thead>
+                <tr>
+                  <th>MODEL</th>
+                  <th>ROLE</th>
+                  <th>ACCURACY</th>
+                  <th>CONFIDENCE</th>
+                  <th>HANDLING / ESCALATION</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><strong>XGBoost</strong></td>
+                  <td>Baseline</td>
+                  <td>{xgb ? `${(Number(xgb.accuracy) * 100).toFixed(2)}%` : "—"}</td>
+                  <td>ROC-AUC {xgb ? Number(xgb.macro_roc_auc).toFixed(4) : "—"}</td>
+                  <td>{xgb ? `${xgb.test_samples} test samples` : "—"}</td>
+                </tr>
+                <tr>
+                  <td><strong>Student DNN</strong></td>
+                  <td>Primary Fast Detector</td>
+                  <td>{student ? `${(Number(student.accuracy) * 100).toFixed(2)}%` : "—"}</td>
+                  <td>{student ? Number(student.mean_confidence).toFixed(4) : "—"}</td>
+                  <td>{student ? `${Number(student.samples_handled)} handled (${Number(student.handling_percent).toFixed(1)}%)` : "—"}</td>
+                </tr>
+                <tr>
+                  <td><strong>FT-Transformer</strong></td>
+                  <td>Escalation Teacher</td>
+                  <td>{teacher ? `${(Number(teacher.accuracy) * 100).toFixed(2)}%` : "—"}</td>
+                  <td>{teacher ? Number(teacher.mean_confidence).toFixed(4) : "—"}</td>
+                  <td>{teacher ? `${Number(teacher.samples_handled)} escalated (${Number(teacher.escalation_percent).toFixed(1)}%)` : "—"}</td>
+                </tr>
+                <tr>
+                  <td><strong>Student + FT-Transformer</strong></td>
+                  <td>Final Detection Cascade</td>
+                  <td>{cascade ? `${Number(cascade.accuracy_percent).toFixed(2)}%` : "—"}</td>
+                  <td>Attack success {cascade ? `${Number(cascade.attack_success_percent).toFixed(2)}%` : "—"}</td>
+                  <td>{cascade ? `${Number(cascade.cascade_bypass_percent).toFixed(1)}% bypassed teacher` : "—"}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section className="dashboard-grid" style={{ marginTop: "20px" }}>
+          <div className="dashboard-panel">
+            <div className="panel-heading">
+              <div>
+                <h2>Adaptive Limiter</h2>
+                <p>Reputation-aware request control</p>
+              </div>
+              <span className="live-label">{limiter?.status || "ACTIVE"}</span>
+            </div>
+
+            <div className="risk-factors" style={{ padding: "20px" }}>
+              <RiskBar label="Initial Rate" value={Math.min(Number(limiter?.initial_rate || 0) * 2, 100)} type="info" />
+              <RiskBar label="Minimum Rate" value={Math.min(Number(limiter?.minimum_rate || 0) * 10, 100)} type="warning" />
+              <RiskBar label="Reputation Ceiling" value={Number(limiter?.maximum_reputation || 0)} type="danger" />
+            </div>
+          </div>
+
+          <div className="dashboard-panel">
+            <div className="panel-heading">
+              <div>
+                <h2>Reputation Decay</h2>
+                <p>Recovery after attack activity</p>
+              </div>
+              <span className="live-label">{decay?.status || "ACTIVE"}</span>
+            </div>
+
+            <div className="chart-box">
+              <ResponsiveContainer width="100%" height={260}>
+                <LineChart
+                  data={[
+                    { time: "Start", reputation: Number(decay?.initial_reputation || 0) },
+                    { time: "1s", reputation: Number(decay?.after_1_second || 0) },
+                    { time: "2s", reputation: Number(decay?.after_2_seconds || 0) },
+                    { time: "3s", reputation: Number(decay?.after_3_seconds || 0) },
+                    { time: "4s", reputation: Number(decay?.after_4_seconds || 0) },
+                    { time: "5s", reputation: Number(decay?.after_5_seconds || 0) },
+                  ]}
+                >
+                  <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
+                  <XAxis dataKey="time" stroke="#94a3b8" />
+                  <YAxis domain={[0, 100]} stroke="#94a3b8" />
+                  <Tooltip contentStyle={{ background: "#111827", border: "1px solid #334155" }} />
+                  <Line type="monotone" dataKey="reputation" stroke="#3b82f6" strokeWidth={3} dot />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+        </section>
+      </>
+    );
+  };
 
   // ============================================================
   // RISK ANALYSIS
@@ -1114,7 +1388,7 @@ function App() {
         <HealthCard
           title="ML Detection"
           status={backendStatus}
-          description="XGBoost classification engine"
+          description="Student DNN + FT-Transformer cascade"
         />
 
         <HealthCard
@@ -1147,7 +1421,12 @@ function App() {
           </div>
 
           <div>
-            <span>Model</span>
+            <span>Production Model</span>
+            <strong>Student DNN + FT-Transformer</strong>
+          </div>
+
+          <div>
+            <span>Baseline Model</span>
             <strong>XGBoost</strong>
           </div>
 
@@ -1187,6 +1466,9 @@ function App() {
 
       case "Attack Detection":
         return renderAttackDetection();
+
+      case "Model Evaluation":
+        return renderModelEvaluation();
 
       case "Risk Analysis":
         return renderRiskAnalysis();

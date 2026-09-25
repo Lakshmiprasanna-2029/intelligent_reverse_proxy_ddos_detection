@@ -1,8 +1,8 @@
 """
 AegisProxy E4 Evaluation
 
-Evaluates the complete ML cascade on replayed
-benign and attack traffic.
+Replays the actual test.parquet through the complete
+Student DNN + FT-Transformer cascade.
 
 Metrics:
     ASR = Attack Success Rate
@@ -13,19 +13,18 @@ ASR:
     as BENIGN.
 
 CBR:
-    Fraction of requests handled by the Student model
-    without escalation to the FT-Transformer teacher.
+    Fraction of requests handled by Student
+    without Teacher escalation.
 """
 
 from pathlib import Path
 import sys
-import time
 import numpy as np
 import pandas as pd
 
-# ------------------------------------------------------------
-# Project root
-# ------------------------------------------------------------
+# ============================================================
+# PROJECT ROOT
+# ============================================================
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
@@ -34,14 +33,15 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from backend.cascade import predict
 
 
-# ------------------------------------------------------------
-# Configuration
-# ------------------------------------------------------------
+# ============================================================
+# PATHS
+# ============================================================
 
 TEST_PATH = (
     PROJECT_ROOT
-    / "results"
-    / "test_predictions.csv"
+    / "data"
+    / "processed"
+    / "test.parquet"
 )
 
 OUTPUT_PATH = (
@@ -50,20 +50,12 @@ OUTPUT_PATH = (
     / "e4_evaluation.csv"
 )
 
-REPETITIONS = 3
-
-ATTACK_CLASSES = {
-    "DDoS_LOIC_HTTP",
-    "DoS_GoldenEye",
-    "DoS_Hulk",
-    "DoS_Slowhttptest",
-    "DoS_Slowloris",
-}
+REPETITIONS = 1
 
 
-# ------------------------------------------------------------
-# Locate feature columns
-# ------------------------------------------------------------
+# ============================================================
+# 28 PARITY FEATURES
+# ============================================================
 
 PARITY_FEATURES = [
     "Flow Duration",
@@ -99,34 +91,44 @@ PARITY_FEATURES = [
 assert len(PARITY_FEATURES) == 28
 
 
-# ------------------------------------------------------------
-# Load test data
-# ------------------------------------------------------------
+# ============================================================
+# START
+# ============================================================
 
 print("=" * 70)
 print("AEGISPROXY — E4 CASCADE EVALUATION")
 print("=" * 70)
 
-if not TEST_PATH.exists():
-    raise FileNotFoundError(
-        f"Test prediction file not found:\n{TEST_PATH}"
-    )
-
-df = pd.read_csv(TEST_PATH)
-
-print("\nLoaded:")
+print("\nTest dataset:")
 print(TEST_PATH)
 
-print("\nShape:")
+
+# ============================================================
+# CHECK FILE
+# ============================================================
+
+if not TEST_PATH.exists():
+    raise FileNotFoundError(
+        f"\nTest dataset not found:\n{TEST_PATH}"
+    )
+
+
+# ============================================================
+# LOAD DATA
+# ============================================================
+
+df = pd.read_parquet(TEST_PATH)
+
+print("\nDataset shape:")
 print(df.shape)
 
 print("\nColumns:")
 print(df.columns.tolist())
 
 
-# ------------------------------------------------------------
-# Find feature columns
-# ------------------------------------------------------------
+# ============================================================
+# VERIFY PARITY FEATURES
+# ============================================================
 
 missing = [
     feature
@@ -136,63 +138,100 @@ missing = [
 
 if missing:
 
-    # Some prediction files may not contain raw features.
-    # In that case E4 cannot replay the original flows.
-
     raise ValueError(
-        "E4 requires the 28 raw parity features.\n"
-        f"Missing features: {missing}\n\n"
-        "Use the original test.parquet from the dataset "
-        "instead of a prediction-only CSV."
+        "\nMissing parity features:\n"
+        + "\n".join(missing)
     )
 
+print(
+    "\nNumber of parity features found:",
+    len(PARITY_FEATURES)
+)
 
-# ------------------------------------------------------------
-# Label column
-# ------------------------------------------------------------
+print("Missing:")
+print(missing)
 
-LABEL_COLUMN = None
 
-for candidate in ["Label", "label", "class", "Class"]:
+# ============================================================
+# LABEL
+# ============================================================
 
-    if candidate in df.columns:
-        LABEL_COLUMN = candidate
-        break
-
-if LABEL_COLUMN is None:
+if "Label" not in df.columns:
 
     raise ValueError(
-        "Could not find the ground-truth label column."
+        "Ground-truth 'Label' column not found."
     )
 
+print("\nClass distribution:")
 
-# ------------------------------------------------------------
-# Select balanced replay sample
-# ------------------------------------------------------------
+print(
+    df["Label"].value_counts()
+)
 
-benign = df[
-    df[LABEL_COLUMN].astype(str).str.upper()
+
+# ============================================================
+# CLEAN FEATURES
+# ============================================================
+
+evaluation_df = df[
+    PARITY_FEATURES + ["Label"]
+].copy()
+
+
+# Replace invalid numerical values
+
+evaluation_df[PARITY_FEATURES] = (
+    evaluation_df[PARITY_FEATURES]
+    .replace([np.inf, -np.inf], np.nan)
+)
+
+
+before = len(evaluation_df)
+
+evaluation_df = evaluation_df.dropna(
+    subset=PARITY_FEATURES
+)
+
+after = len(evaluation_df)
+
+print(
+    f"\nRemoved invalid rows: {before - after}"
+)
+
+
+# ============================================================
+# BALANCED REPLAY SET
+# ============================================================
+
+benign = evaluation_df[
+    evaluation_df["Label"]
+    .astype(str)
+    .str.upper()
     == "BENIGN"
 ]
 
-attacks = df[
-    df[LABEL_COLUMN].astype(str).str.upper()
+attacks = evaluation_df[
+    evaluation_df["Label"]
+    .astype(str)
+    .str.upper()
     != "BENIGN"
 ]
+
 
 print("\nBenign samples:", len(benign))
 print("Attack samples:", len(attacks))
 
 
-if len(benign) == 0 or len(attacks) == 0:
+if len(benign) == 0:
+    raise ValueError("No BENIGN samples found.")
 
-    raise ValueError(
-        "Both benign and attack traffic are required."
-    )
+if len(attacks) == 0:
+    raise ValueError("No attack samples found.")
 
 
-# Keep evaluation reasonably fast.
-# Equal number of benign and attack flows.
+# ============================================================
+# BALANCED SAMPLE
+# ============================================================
 
 sample_size = min(
     len(benign),
@@ -200,77 +239,114 @@ sample_size = min(
     1000
 )
 
-benign = benign.sample(
+benign_sample = benign.sample(
     n=sample_size,
     random_state=42
 )
 
-attacks = attacks.sample(
+attack_sample = attacks.sample(
     n=sample_size,
     random_state=42
 )
+
 
 evaluation_df = pd.concat(
-    [benign, attacks],
+    [
+        benign_sample,
+        attack_sample
+    ],
     ignore_index=True
 )
 
+
+# Shuffle
+
+evaluation_df = evaluation_df.sample(
+    frac=1.0,
+    random_state=42
+).reset_index(drop=True)
+
+
 print(
-    "\nReplay set:",
+    "\nBalanced replay set:",
     len(evaluation_df)
 )
 
 
-# ------------------------------------------------------------
-# E4 evaluation
-# ------------------------------------------------------------
+# ============================================================
+# METRIC COUNTERS
+# ============================================================
 
 records = []
 
 total_requests = 0
+
 student_requests = 0
+
 teacher_requests = 0
 
 attack_requests = 0
+
 attack_successes = 0
 
+correct_predictions = 0
 
-for repetition in range(1, REPETITIONS + 1):
+
+# ============================================================
+# REPLAY
+# ============================================================
+
+for repetition in range(
+    1,
+    REPETITIONS + 1
+):
 
     print(
-        f"\nRunning replay {repetition}/{REPETITIONS}..."
+        f"\nRunning replay "
+        f"{repetition}/{REPETITIONS}..."
     )
 
-    for _, row in evaluation_df.iterrows():
+    for index, row in evaluation_df.iterrows():
 
         features = [
-            row[feature]
+            float(row[feature])
             for feature in PARITY_FEATURES
         ]
 
         true_label = str(
-            row[LABEL_COLUMN]
+            row["Label"]
         )
 
         try:
 
-            result = predict(features)
+            result = predict(
+                features
+            )
 
         except Exception as e:
 
             print(
-                "Prediction failed:",
-                e
+                f"\nPrediction failed "
+                f"at sample {index}:"
             )
+
+            print(e)
 
             continue
 
+
+        # ----------------------------------------------------
+        # COUNTERS
+        # ----------------------------------------------------
+
         total_requests += 1
+
 
         model_used = result.get(
             "model_used",
             "unknown"
         )
+
 
         if model_used == "student":
 
@@ -280,32 +356,57 @@ for repetition in range(1, REPETITIONS + 1):
 
             teacher_requests += 1
 
-        is_attack = (
-            true_label.upper() != "BENIGN"
+
+        # ----------------------------------------------------
+        # PREDICTION
+        # ----------------------------------------------------
+
+        predicted_label = result.get(
+            "predicted_class_name"
         )
+
+
+        if predicted_label == true_label:
+
+            correct_predictions += 1
+
+
+        # ----------------------------------------------------
+        # ATTACK
+        # ----------------------------------------------------
+
+        is_attack = (
+            true_label.upper()
+            != "BENIGN"
+        )
+
 
         if is_attack:
 
             attack_requests += 1
 
-            predicted_name = result.get(
-                "predicted_class_name"
-            )
-
-            if predicted_name == "BENIGN":
+            if predicted_label == "BENIGN":
 
                 attack_successes += 1
 
+
+        # ----------------------------------------------------
+        # SAVE RESULT
+        # ----------------------------------------------------
+
         records.append({
 
-            "repetition": repetition,
+            "repetition":
+                repetition,
 
-            "true_label": true_label,
+            "sample_index":
+                index,
+
+            "true_label":
+                true_label,
 
             "predicted_label":
-                result.get(
-                    "predicted_class_name"
-                ),
+                predicted_label,
 
             "model_used":
                 model_used,
@@ -330,12 +431,29 @@ for repetition in range(1, REPETITIONS + 1):
                     "attack_probability"
                 ),
 
+            "cascade_threshold":
+                result.get(
+                    "cascade_threshold"
+                ),
+
         })
 
 
-# ------------------------------------------------------------
-# Metrics
-# ------------------------------------------------------------
+# ============================================================
+# METRICS
+# ============================================================
+
+if total_requests > 0:
+
+    accuracy = (
+        correct_predictions
+        / total_requests
+    )
+
+else:
+
+    accuracy = 0.0
+
 
 if attack_requests > 0:
 
@@ -362,17 +480,25 @@ else:
 
 
 teacher_rate = (
-    teacher_requests / total_requests
+    teacher_requests
+    / total_requests
     if total_requests
     else 0.0
 )
 
 
-# ------------------------------------------------------------
-# Save detailed results
-# ------------------------------------------------------------
+# ============================================================
+# SAVE
+# ============================================================
 
-results_df = pd.DataFrame(records)
+results_df = pd.DataFrame(
+    records
+)
+
+OUTPUT_PATH.parent.mkdir(
+    parents=True,
+    exist_ok=True
+)
 
 results_df.to_csv(
     OUTPUT_PATH,
@@ -380,9 +506,9 @@ results_df.to_csv(
 )
 
 
-# ------------------------------------------------------------
-# Print results
-# ------------------------------------------------------------
+# ============================================================
+# RESULTS
+# ============================================================
 
 print("\n")
 print("=" * 70)
@@ -390,43 +516,58 @@ print("E4 RESULTS")
 print("=" * 70)
 
 print(
-    f"Total requests       : {total_requests}"
+    f"Total requests       : "
+    f"{total_requests}"
 )
 
 print(
-    f"Attack requests      : {attack_requests}"
+    f"Attack requests      : "
+    f"{attack_requests}"
 )
 
 print(
-    f"Student decisions    : {student_requests}"
+    f"Student decisions    : "
+    f"{student_requests}"
 )
 
 print(
-    f"Teacher decisions    : {teacher_requests}"
+    f"Teacher decisions    : "
+    f"{teacher_requests}"
 )
 
 print(
-    f"Teacher escalation   : {teacher_rate:.4f}"
+    f"Overall Accuracy     : "
+    f"{accuracy:.4f}"
 )
 
 print(
-    f"Cascade Bypass Rate  : {CBR:.4f}"
+    f"Teacher escalation   : "
+    f"{teacher_rate:.4f}"
 )
 
 print(
-    f"Attack Success Rate  : {ASR:.4f}"
+    f"Cascade Bypass Rate  : "
+    f"{CBR:.4f}"
 )
 
 print(
-    f"Attack Success %     : {ASR * 100:.2f}%"
+    f"Attack Success Rate  : "
+    f"{ASR:.4f}"
 )
 
 print(
-    f"Student handling %   : {CBR * 100:.2f}%"
+    f"Attack Success %     : "
+    f"{ASR * 100:.2f}%"
 )
 
 print(
-    f"Teacher handling %   : {teacher_rate * 100:.2f}%"
+    f"Student handling %   : "
+    f"{CBR * 100:.2f}%"
+)
+
+print(
+    f"Teacher handling %   : "
+    f"{teacher_rate * 100:.2f}%"
 )
 
 print("\nSaved:")
