@@ -1,0 +1,8 @@
+{
+    "0": "BENIGN",
+    "1": "DDoS_LOIC_HTTP",
+    "2": "DoS_GoldenEye",
+    "3": "DoS_Hulk",
+    "4": "DoS_Slowhttptest",
+    "5": "DoS_Slowloris"
+}
